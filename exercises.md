@@ -3,10 +3,10 @@
 > **Bài làm cá nhân.** Trả lời bằng lời của chính bạn, dựa trên những gì bạn
 > quan sát được khi chạy code — không sao chép đáp án của người khác.
 >
-> Cách trả lời: thay dòng `> *Câu trả lời của bạn*` bằng câu trả lời.
+> Cách trả lời: thay dòng giữ chỗ dưới mỗi câu bằng câu trả lời.
 > `grade.py` đếm số câu đã trả lời (15 điểm cho 10 câu).
 >
-> Họ và tên: ..........................  Mã học viên: ..........................
+> Họ và tên: Nguyễn Văn Hưởng Mã học viên:2A202602743
 
 ---
 
@@ -16,7 +16,13 @@ Trong `Settings`, `agent_api_key` không có giá trị mặc định nên app c
 khi khởi động nếu thiếu biến môi trường. Hãy mô tả một tình huống cụ thể mà
 việc "chết sớm" này cứu bạn, so với việc để mặc định `"changeme"`.
 
-> *Câu trả lời của bạn*
+> Một tình huống cụ thể là khi mình deploy service lên cloud nhưng quên khai
+> báo `AGENT_API_KEY`. Vì trường này không có giá trị mặc định, Pydantic báo
+> lỗi ngay khi service khởi động và bản deploy không được đưa ra phục vụ. Mình
+> có thể nhìn log deploy, bổ sung secret rồi chạy lại trước khi có request thật.
+> Nếu code dùng mặc định `"changeme"`, service vẫn lên bình thường với một khóa
+> rất dễ đoán; người lạ có thể gọi `/ask` và làm phát sinh chi phí mà mình không
+> nhận ra ngay.
 
 ---
 
@@ -26,7 +32,15 @@ Chạy service và gọi `/ask` vài lần. Dán một dòng log JSON bạn thu 
 nêu **hai** việc bạn làm được với dòng log đó mà `print("đã trả lời xong")`
 không làm được.
 
-> *Câu trả lời của bạn*
+> Sau khi gọi `/ask` bằng user `sv01`, mình thu được dòng log:
+>
+> `{"event": "ask_completed", "level": "info", "timestamp": "2026-09-28T09:00:54.643193+00:00", "user_id": "sv01", "tokens_in": 3, "tokens_out": 37, "cost_usd": 2.265e-05}`
+>
+> Từ JSON này, mình có thể lọc và đếm các sự kiện `ask_completed` theo
+> `user_id` hoặc theo khoảng thời gian. Mình cũng có thể cộng `cost_usd` và số
+> token của từng user để tìm người dùng tốn nhiều chi phí hoặc tạo cảnh báo khi
+> chi phí tăng bất thường. Dòng `print("đã trả lời xong")` không chứa các trường
+> có cấu trúc nên không thực hiện được hai việc đó một cách đáng tin cậy.
 
 ---
 
@@ -40,14 +54,20 @@ docker build -t agent:multi .
 docker images | grep agent
 ```
 
-| Bản | Dung lượng |
-|-----|-----------|
-| 1 stage (bản đầu) | ... MB |
-| Multi-stage | ... MB |
+| Bản               | Dung lượng |
+| ----------------- | ---------- |
+| 1 stage (bản đầu) | 1.7 GB     |
+| Multi-stage       | 297 MB     |
 
 Giải thích: phần dung lượng chênh lệch đó là những gì?
 
-> *Câu trả lời của bạn*
+> Mình build hai image `agent:single` và `agent:multi`, sau đó đọc kết quả bằng
+> `docker image ls`. Bản một stage dùng image `python:3.11` đầy đủ và giữ toàn
+> bộ filesystem của quá trình build trong image cuối. Bản multi-stage dùng
+> `python:3.11-slim`; stage runtime chỉ nhận các package đã cài từ builder cùng
+> với `app` và `utils`. Vì vậy runtime không mang theo phần hệ điều hành đầy đủ,
+> file build và các file khác trong repository. Trong lần đo này, kích thước
+> hiển thị giảm từ 1.7 GB xuống 297 MB, chênh khoảng 1.4 GB.
 
 ---
 
@@ -57,7 +77,15 @@ Sửa một ký tự trong `app/main.py` rồi build lại. Với Dockerfile c�
 layer nào được dùng lại từ cache, layer nào phải chạy lại? Nếu bạn đặt
 `COPY . .` lên trước `RUN pip install` thì kết quả khác thế nào?
 
-> *Câu trả lời của bạn*
+> Khi mình sửa source rồi build lại bản multi-stage, các layer base image,
+> `COPY requirements.txt`, `pip install`, tạo `appuser` và copy dependency từ
+> builder đều được lấy từ cache vì `requirements.txt` không thay đổi. Layer
+> `COPY app ./app` phải chạy lại do nội dung `app/main.py` đã đổi; các layer
+> runtime đứng sau nó và bước export image cũng được tạo lại. Nếu đặt
+> `COPY . .` trước `RUN pip install`, chỉ một thay đổi trong source cũng làm
+> layer `COPY` đổi, kéo theo layer cài dependency mất cache. Khi đó Docker phải
+> tải và cài lại toàn bộ package dù `requirements.txt` không đổi, làm build
+> chậm hơn rất nhiều.
 
 ---
 
@@ -67,7 +95,14 @@ Container mặc định chạy bằng root. Mô tả chuỗi sự kiện dẫn t
 trong code Python của bạn" tới "kẻ tấn công có quyền cao trên máy host", và
 lệnh `USER` cắt đứt chuỗi đó ở chỗ nào.
 
-> *Câu trả lời của bạn*
+> Nếu ứng dụng Python có lỗ hổng cho phép thực thi lệnh, kẻ tấn công trước tiên
+> chiếm quyền của process trong container. Nếu process chạy bằng root, họ có
+> thể sửa file hệ thống trong container, đọc các secret hoặc volume được mount,
+> rồi lợi dụng cấu hình đặc quyền, Docker socket hay một lỗ hổng container/kernel
+> để tác động đến host với quyền cao. Lệnh `USER appuser` cắt chuỗi này ngay sau
+> bước thực thi lệnh: mã độc chỉ chạy dưới UID 10001, không có quyền root để sửa
+> file hệ thống hay dùng các tài nguyên đặc quyền. Cơ chế này không thay thế
+> việc vá lỗ hổng, nhưng làm giảm đáng kể phạm vi thiệt hại nếu ứng dụng bị phá.
 
 ---
 
