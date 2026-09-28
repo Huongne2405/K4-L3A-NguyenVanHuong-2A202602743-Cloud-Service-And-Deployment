@@ -16,12 +16,12 @@ Trong `Settings`, `agent_api_key` không có giá trị mặc định nên app c
 khi khởi động nếu thiếu biến môi trường. Hãy mô tả một tình huống cụ thể mà
 việc "chết sớm" này cứu bạn, so với việc để mặc định `"changeme"`.
 
-> Một tình huống cụ thể là khi mình deploy service lên cloud nhưng quên khai
+> Một tình huống cụ thể là khi tôi deploy service lên cloud nhưng quên khai
 > báo `AGENT_API_KEY`. Vì trường này không có giá trị mặc định, Pydantic báo
-> lỗi ngay khi service khởi động và bản deploy không được đưa ra phục vụ. Mình
+> lỗi ngay khi service khởi động và bản deploy không được đưa ra phục vụ. Tôi
 > có thể nhìn log deploy, bổ sung secret rồi chạy lại trước khi có request thật.
 > Nếu code dùng mặc định `"changeme"`, service vẫn lên bình thường với một khóa
-> rất dễ đoán; người lạ có thể gọi `/ask` và làm phát sinh chi phí mà mình không
+> rất dễ đoán; người lạ có thể gọi `/ask` và làm phát sinh chi phí mà tôi không
 > nhận ra ngay.
 
 ---
@@ -32,12 +32,12 @@ Chạy service và gọi `/ask` vài lần. Dán một dòng log JSON bạn thu 
 nêu **hai** việc bạn làm được với dòng log đó mà `print("đã trả lời xong")`
 không làm được.
 
-> Sau khi gọi `/ask` bằng user `sv01`, mình thu được dòng log:
+> Sau khi gọi `/ask` bằng user `sv01`, tôi thu được dòng log:
 >
 > `{"event": "ask_completed", "level": "info", "timestamp": "2026-09-28T09:00:54.643193+00:00", "user_id": "sv01", "tokens_in": 3, "tokens_out": 37, "cost_usd": 2.265e-05}`
 >
-> Từ JSON này, mình có thể lọc và đếm các sự kiện `ask_completed` theo
-> `user_id` hoặc theo khoảng thời gian. Mình cũng có thể cộng `cost_usd` và số
+> Từ JSON này, tôi có thể lọc và đếm các sự kiện `ask_completed` theo
+> `user_id` hoặc theo khoảng thời gian. Tôi cũng có thể cộng `cost_usd` và số
 > token của từng user để tìm người dùng tốn nhiều chi phí hoặc tạo cảnh báo khi
 > chi phí tăng bất thường. Dòng `print("đã trả lời xong")` không chứa các trường
 > có cấu trúc nên không thực hiện được hai việc đó một cách đáng tin cậy.
@@ -61,7 +61,7 @@ docker images | grep agent
 
 Giải thích: phần dung lượng chênh lệch đó là những gì?
 
-> Mình build hai image `agent:single` và `agent:multi`, sau đó đọc kết quả bằng
+> Tôi build hai image `agent:single` và `agent:multi`, sau đó đọc kết quả bằng
 > `docker image ls`. Bản một stage dùng image `python:3.11` đầy đủ và giữ toàn
 > bộ filesystem của quá trình build trong image cuối. Bản multi-stage dùng
 > `python:3.11-slim`; stage runtime chỉ nhận các package đã cài từ builder cùng
@@ -77,7 +77,7 @@ Sửa một ký tự trong `app/main.py` rồi build lại. Với Dockerfile c�
 layer nào được dùng lại từ cache, layer nào phải chạy lại? Nếu bạn đặt
 `COPY . .` lên trước `RUN pip install` thì kết quả khác thế nào?
 
-> Khi mình sửa source rồi build lại bản multi-stage, các layer base image,
+> Khi tôi sửa source rồi build lại bản multi-stage, các layer base image,
 > `COPY requirements.txt`, `pip install`, tạo `appuser` và copy dependency từ
 > builder đều được lấy từ cache vì `requirements.txt` không thay đổi. Layer
 > `COPY app ./app` phải chạy lại do nội dung `app/main.py` đã đổi; các layer
@@ -145,7 +145,17 @@ nhưng cost guard phải chặn, và một tình huống ngược lại.
 Nếu gộp hai endpoint làm một và cho nó kiểm tra Redis, chuyện gì xảy ra với cụm
 3 container khi Redis mất kết nối 30 giây? Trả lời theo đúng thứ tự sự kiện.
 
-> *Câu trả lời của bạn*
+> Nếu gộp hai endpoint và dùng kết quả kiểm tra Redis làm liveness probe, khi
+> Redis mất kết nối thì cả ba container agent gần như đồng thời trả 503. Sau
+> số lần probe thất bại theo cấu hình, orchestrator cho rằng cả ba process đã
+> chết và restart chúng, dù bản thân process Python vẫn hoạt động. Các request
+> đang xử lý có thể bị ngắt, còn container mới khởi động vẫn tiếp tục fail nếu
+> Redis chưa phục hồi, tạo thành vòng lặp restart và làm cả cụm mất khả dụng.
+> Khi Redis hoạt động lại sau 30 giây, các container còn phải khởi động lại và
+> qua health check mới nhận traffic được. Với hai endpoint riêng, `/health`
+> vẫn trả 200 nên container không bị restart; `/ready` trả 503 để load balancer
+> tạm ngừng gửi request. Redis phục hồi thì `/ready` tự trở lại 200 và cả ba
+> container được đưa vào phục vụ mà không cần khởi động lại.
 
 ---
 
@@ -155,7 +165,14 @@ Chạy `docker compose up --scale agent=3` rồi gọi `/ask` nhiều lần vớ
 `X-User-Id`. Quan sát `history_length` trong response. Nếu lịch sử được lưu
 trong một dict Python thay vì Redis, bạn sẽ thấy con số đó thay đổi thế nào?
 
-> *Câu trả lời của bạn*
+> Với Redis dùng chung, mỗi lần `/ask` ghi hai message gồm câu hỏi của user và
+> câu trả lời của assistant. Vì vậy khi gọi liên tiếp với cùng `X-User-Id`,
+> tôi thấy `history_length` tăng theo `0, 2, 4, 6, ...` dù request được chuyển
+> tới container nào. Nếu dùng một dict Python, ba container có ba bản lịch sử
+> độc lập. Với phân phối round-robin, kết quả có thể thành `0, 0, 0, 2, 2, 2,
+> ...`; nếu cách phân phối không đều thì con số còn nhảy lên xuống tùy request
+> rơi vào instance nào. Khi một container restart, lịch sử trong dict của nó
+> mất hoàn toàn và request tới container đó lại thấy `history_length` bằng 0.
 
 ---
 
@@ -165,4 +182,11 @@ Ghi lại **một** lỗi bạn gặp khi deploy lên cloud (build fail, health 
 timeout, sai REDIS_URL, app không đọc `$PORT`...): thông báo lỗi là gì, bạn
 tìm ra nguyên nhân bằng cách nào, và sửa ra sao?
 
-> *Câu trả lời của bạn*
+> Lỗi tôi gặp ở bước deploy là terminal không nhận lệnh Railway và báo
+> `zsh: command not found: railway`. Tôi kiểm tra bằng `command -v railway`
+> và thấy máy chưa cài Railway CLI, nên lỗi nằm ở công cụ deploy chứ không phải
+> Dockerfile hay ứng dụng. Tôi khắc phục bằng cách chạy CLI trực tiếp qua
+> `npx --yes @railway/cli`, đăng nhập bằng browserless login, tạo project cùng
+> service Redis rồi chạy deploy từ thư mục repository. Sau khi deployment báo
+> `SUCCESS`, tôi tạo public domain và kiểm tra lại URL thật: `/health` và
+> `/ready` đều trả 200, còn `/ask` không có API key trả 401 như mong đợi.
